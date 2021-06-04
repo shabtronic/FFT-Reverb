@@ -1,6 +1,7 @@
 # FFT-Reverb
 R&amp;D for a pure FFT based reverb 
 
+## Idea
 
 The initial idea is to leaky integrate a FFT (with a time constant decay), and phase modulate the bins (maybe SHM resonant springs and some sinusoids).
 
