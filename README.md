@@ -24,5 +24,5 @@ I choose the next POT FFT size based on the delay/window size.
 
 ## To do
 
-Add some of graph editor, so I can edit the decay of FFT bin frequencies e.t.c.
+Add some of graph editor, so I can edit the decay of FFT bin frequencies e.t.c. Instead of having a global decay - I could sculpt the decays, probably reverting back to a modal resonance sounding system :)
 
