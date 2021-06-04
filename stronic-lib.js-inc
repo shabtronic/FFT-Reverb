@@ -1,0 +1,951 @@
+@init
+// (C) 2020 S.D.Smith - All rights reserved
+//
+// strictly non commercial use
+//
+// contact: shabtronic@gmail.com
+//
+// Simple add on library for reaper JS
+//
+// Implementation Notes:
+//
+// Import libfile
+// The call order is libfile first - then
+// host file for @init @gfx e.t.c
+//
+// Reaper JS functions are case insensitve
+// Repear JS is missing a few usful math functions
+// frac,mod,lamp,tanh,sinc e.t.c.
+
+
+
+
+function ProcessEnvelope(idx,in,decay)
+(
+Envelopes[idx]*=decay;
+abs(in)>Envelopes[idx] ? Envelopes[idx]=abs(in);
+
+Envelopes[idx];
+);
+function blit(i,x,y,w,h)
+(
+gfx_getimgdim(i,iw,ih);
+gfx_blit(0,1,0,0,0,iw,ih,x,y,w,h);
+);
+// creates Grid Cell coords in _rectx,_recty,_rectw,_recth in pixels
+function VGradient(i,w,h)
+(
+gfx_setimgdim(i,w,h);
+gfx_getimgdim(i,iw,ih);
+gfx_dest=0;
+
+sr=1;sg=1;sb=1;
+er=0.0;eg=0.;eb=0.1;
+dr=(er-sr)/ih;
+dg=(eg-sg)/ih;
+db=(eb-sb)/ih;
+
+x=0;
+while (x<iw)
+  (
+  y=0;
+  gfx_x=x;
+  while (y<ih)
+    (
+    gfx_y=y;
+    dd=y;
+    gfx_a=0.5;
+    gfx_setpixel(sr+(dr*dd),sg+(dg*dd),sb+(db*dd));
+    y+=1;
+    );
+  x+=1;
+  );
+ gfx_dest=-1; 
+);
+
+// Rect Functions
+
+function Scale(r,percent)
+(
+this.x-=percent;
+this.y-=percent;
+this.w*=percent*2;
+this.h*=percent*2;
+this;
+);
+function CopyRect(sr)
+(
+this.x=sr.x;
+this.y=sr.y;
+this.w=sr.w;
+this.h=sr.h;
+this;
+);
+function MakeRect(x,y,w,h)
+(
+this.x=x;
+this.y=y;
+this.w=w;
+this.h=h;
+this;
+);
+
+// General Purpose functions  ********************************************************************
+function frac(x)  ( x-floor(x);  );
+function mod(x,y)  ( x=((x/y)-floor(x/y))*y;);
+function clamp(v,minv,maxv) ( v<minv? v=minv; v>maxv? v=maxv; v; );
+function tanh(x)  ( (exp(x)-exp(-x))/(exp(x)+exp(-x)); );
+function sinc(x) ( sin(x)/x;);
+function AmpToDB(amp,lowdb) ( clamp(1-(-20*log10(mag)/lowdb),0,1);  );
+
+// Memory allocation functions *******************************************************************
+function getmem(size)
+(
+_oldmemp=_memp;
+_memp+=size;
+_oldmemp;
+);
+
+function getmem(elements,size)
+(
+getmem(elements*size);
+);
+function ClearDelays()
+(
+DelayLines!=0? memset(DelayLines,0,DelayMemSize);
+);
+function InitDelayLines(count,maxsecs)
+(
+
+MaxDelaySize=srate*maxsecs;
+MaxDelays=count;
+DelayMemSize=MaxDelays*MaxDelaySize;
+DelayParams=getmem(MaxDelays,4); // 0=pointer,1=modphase,2=oldsize,3=DelayArray
+DelayLines=getmem(MaxDelays,MaxDelaySize);
+);
+
+function GetArray(idx)
+(
+DelayLines+(idx*MaxDelaySize);
+);
+
+// Sliders  **************************************************************************************
+
+function AddSlider(name,defaultvalue,vmin,vmax,flags,hoverhint)
+(
+SliderCount<256?
+(
+strcpy(SliderCount,name);
+strcpy(SliderCount+256,hoverhint);
+Sliders[SliderCount*5+0]=defaultvalue;
+Sliders[SliderCount*5+1]=vmin;
+Sliders[SliderCount*5+2]=vmax;
+Sliders[SliderCount*5+3]=flags;
+Sliders[SliderCount*5+4]=defaultvalue;
+// 0=float 1=int 2=hz 3=display% 4=secs
+//slider(SliderCount+1)=defaultvalue;
+//sliderchange(SliderCount+1);
+os=SliderCount;
+SliderCount+=1;
+os;
+);
+);
+
+function AddSliderFloat(name,v,vmin,vmax,hoverhint)  (AddSlider(name,v,vmin,vmax,0,hoverhint););
+function AddSliderFreq(name,v,vmin,vmax,hoverhint)  (AddSlider(name,v,vmin,vmax,2,hoverhint););
+function AddSliderInt(name,v,vmin,vmax,hoverhint)  (AddSlider(name,v,vmin,vmax,1,hoverhint););
+function AddSliderPercent(name,v,vmin,vmax,hoverhint)  (AddSlider(name,v,vmin,vmax,3,hoverhint););
+function AddSliderTime(name,v,vmin,vmax,hoverhint)  (AddSlider(name,v,vmin,vmax,4,hoverhint););
+function GetSlider(idx) ( Sliders[idx*5+4];);
+function SetSlider(idx,v) ( Sliders[idx*5+4]=v;);
+function SliderDefault(idx) (Sliders[idx*5+4]=Sliders[idx*5+0];);
+//function SerializeSliders() ();
+// Delays **************************************************************************************
+function DelayCleanUp(idx,t) local(ot)
+(
+ot=DelayParams[idx*4+2];
+/*
+while (ot<t)
+  (
+  ot+=1;
+  Delay[ot]=0;
+  );*/
+DelayParams[idx*4+2]=ot;
+);
+
+
+// Simple Ring Buffer pitch shifter
+// Fixed size 8192!
+// Cheap and cheerful - has the terrible steel drum sound!
+// Uses 1 delay line
+// Probably needs a Lo/Hi pass filter based on the pitch amount
+
+function PitchShiftSynced(idx,in,shiftamount,size)
+(
+dsize=size/2;
+mask=(size)-1;
+Delay=DelayLines+(idx*MaxDelaySize);
+WP=DelayParams[idx*4+0];
+Delay[WP&mask]=in;
+RP=(WP*shiftamount); // synchronised with read pointer!
+WP=(WP+1);
+DelayParams[idx*4+0]=WP;
+ip=floor(RP);
+fp=RP-ip;
+ps1=Delay[ip&mask]*(1.0-fp)+Delay[(ip+1)&mask]*fp;
+ps2=Delay[(ip+dsize)&mask]*(1.0-fp)+Delay[(ip+1+dsize)&mask]*fp;
+d1=(RP-WP);
+SinWindow[d1&mask]*ps1+SinWindow[(d1+dsize)&mask]*ps2;
+);
+
+function PitchShiftFreeRunning(idx,in,shiftamount,size)
+(
+dsize=size/2;
+mask=(size)-1;
+Delay=DelayLines+(idx*MaxDelaySize);
+WP=DelayParams[idx*4+0];
+Delay[WP&mask]=in;
+RP=DelayParams[idx*4+1]; 
+RP+=shiftamount;
+WP+=1;
+DelayParams[idx*4+1]=RP;
+DelayParams[idx*4+0]=WP;
+ip=floor(RP);
+fp=RP-ip;
+ps1=Delay[ip&mask]*(1.0-fp)+Delay[(ip+1)&mask]*fp;
+ps2=Delay[(ip+dsize)&mask]*(1.0-fp)+Delay[(ip+1+dsize)&mask]*fp;
+d1=abs(RP-WP);
+SinWindow[d1&mask]*ps1+SinWindow[(d1+dsize)&mask]*ps2;
+);
+function AllPassDelay(idx,in,t,g) local(out,yy)
+(
+Delay=DelayLines+(idx*MaxDelaySize);
+DP=DelayParams[idx*4+0];
+out=Delay[DP];
+yy = in+out*-g;
+//  DNZ "yy" 
+out = yy*g+out;
+Delay[DP] = yy;
+DP+=1;
+DP>=t? DP-=t;
+DelayParams[idx*4+0]=DP;
+out;
+);
+
+function DelayOut(idx)
+(
+Delay=DelayLines+(idx*MaxDelaySize);
+Delay[DelayParams[idx*4+0]];
+);
+
+function DelayOutMod(idx,t,speed,depth)
+(
+Delay=DelayLines+(idx*MaxDelaySize);
+DP=DelayParams[idx*4+0];
+MP=DelayParams[idx*4+1];
+
+// Optimize with a Bez/SHM/truncated Tailor
+Mod=(sin(MP)+1+1.0/srate)*depth;
+MP+=speed;
+DelayParams[idx*4+1]=MP;
+DP+=Mod;
+DP>=t? DP-=t;
+f=frac(DP);
+out=(1-f)*Delay[DP];
+DP+=1;
+DP>=t? DP-=t;
+out+(f)*Delay[DP];
+);
+
+//  DNZ "in" 
+function DelayIn(idx,in,t)
+(
+Delay=DelayLines+(idx*MaxDelaySize);
+DP=DelayParams[idx*4+0];
+out=Delay[DP];
+Delay[DP]=in;
+DP+=1;
+DP>=t? DP=0;
+DelayParams[idx*4+0]=DP;
+out;
+);
+
+// Dsp stuff **************************************************************************************
+
+
+function SinWindow(w,wsize) local(x)
+(
+x=0;
+while (x<wsize)
+  (
+  w[x]=sin(x/wsize*$pi);
+  x+=1;
+  );
+);
+
+
+function FilterLoPass(idx,freq,q)
+(
+K = tan($PI * freq / srate);
+norm = 1.0 / (1 + K / q + K * K);
+Filters[idx*16+0] = K * K * norm;               // B0
+Filters[idx*16+1] = 2.0 * Filters[idx*16+0];    // B1
+Filters[idx*16+2] = Filters[idx*16+0];          // B2
+Filters[idx*16+3] = 2 * (K * K - 1) * norm;     // A1
+Filters[idx*16+4] = (1 - K / q + K * K) * norm; // A2
+//Filters[idx*16+5] = L1
+//Filters[idx*16+6] = L2
+);
+
+function FilterHipass(idx,freq,q)  local(K,norm)
+(  
+K = tan($PI * freq / srate);
+norm = 1 / (1 + K / q + K * K);
+Filters[idx*16+0] = 1 * norm;
+Filters[idx*16+1] = -2 * Filters[idx*16+0];
+Filters[idx*16+2] = Filters[idx*16+0];
+Filters[idx*16+3] = 2 * (K * K - 1) * norm;
+Filters[idx*16+4] = (1 - K / q + K * K) * norm;
+);
+
+function FilterBand(idx,freq,q)  local(K,norm)
+(  
+K = tan($PI * freq / srate);
+norm = 1.0 / (1.0 + K / q + K * K);
+Filters[idx*16+0] = K / q * norm;
+Filters[idx*16+1] = 0.0;
+Filters[idx*16+2]= -Filters[idx*16+0];
+Filters[idx*16+3] = 2.0 * (K * K - 1.0) * norm;
+Filters[idx*16+4] = (1.0 - K / q + K * K) * norm;
+);
+
+function FilterProcess(idx,in)
+(
+bout = in *Filters[idx*16+0] + Filters[idx*16+5];
+Filters[idx*16+5] = in * Filters[idx*16+1] + Filters[idx*16+6] - Filters[idx*16+3] * bout;
+Filters[idx*16+6] = in *Filters[idx*16+2] - Filters[idx*16+4] * bout;
+bout;
+);
+
+function BiquadInit()  ( this.l1=this.l2=this.a1=this.a2=this.b0=this.b1=this.b2=0;);
+function IIRFreq(f)  ( this.fc=(f/srate)/((f/srate)+1););
+
+function ProcessIIRHighPass(in)
+(
+this.a+=(in-this.a)*this.fc;
+in-this.a;
+);
+// RBJ Lowpass
+function Lowpass(freq,q) local(K,norm)
+(
+K = tan($PI * freq / srate);
+norm = 1.0 / (1 + K / q + K * K);
+this.b0 = K * K * norm;
+this.b1 = 2.0 * this.b0;
+this.b2 = this.b0;
+this.a1 = 2 * (K * K - 1) * norm;
+this.a2 = (1 - K / q + K * K) * norm;
+);
+
+// RBJ Hipass
+function Hipass(freq,q)  local(K,norm)
+(  
+K = tan($PI * freq / srate);
+norm = 1 / (1 + K / q + K * K);
+this.b0 = 1 * norm;
+this.b1 = -2 * this.b0;
+this.b2 = this.b0;
+this.a1 = 2 * (K * K - 1) * norm;
+this.a2 = (1 - K / q + K * K) * norm;
+);
+
+function BiquadProcess(in) local(bout)
+(
+bout = in *this.b0 + this.l1;
+this.l1 = in * this.b1 + this.l2 - this.a1 * bout;
+this.l2 = in * this.b2 - this.a2 * bout;
+bout;
+);
+// String Functions  **************************************************************************************
+
+function FreqString(v,str)  ( v>=1000? sprintf(str,"%1.2f khz",v/1000) : sprintf(str,"%1.1f hz",v););
+function IntString(v,str)  ( sprintf(str,"%d",v,str););
+function floatString(v,str)  ( sprintf(str,"%1.2f",v););
+function PercentString(v,str)  ( sprintf(str,"%1.1f%%",v*100););
+function SecsString(v,str)  ( sprintf(str,"%1.0f ms",v););
+
+// UI/GFX lib functions  **************************************************************************************
+function gridx(x,w) (floor(gfx_w/w*x););
+function gridy(y,h) (floor(gfx_h/h*y););
+function rgba(r,g,b,a)
+(
+  gfx_set(r,g,b,a);
+  ColourStack[cstack]=gfx_r;
+  ColourStack[cstack+1]=gfx_g;
+  ColourStack[cstack+2]=gfx_b;
+  ColourStack[cstack+3]=gfx_a;
+);
+function colorinc(i)(gfx_r+=i;gfx_g+=i;gfx_b+=i;);
+function colormul(i)(gfx_r*=i;gfx_g*=i;gfx_b*=i;);
+function colordiv(i)(gfx_r/=i;gfx_g/=i;gfx_b/=i;);
+function BlurScreen()
+(
+gfx_x=0;
+gfx_y=0;
+gfx_blurto(gfx_w,gfx_h);
+);
+
+function borderlight(bl) ( borderhilight=bl; );
+
+function pushcolour()
+(
+cstack<64 ? 
+  (
+  ColourStack[cstack]=gfx_r;
+  ColourStack[cstack+1]=gfx_g;
+  ColourStack[cstack+2]=gfx_b;
+  ColourStack[cstack+3]=gfx_a;
+  cstack+=4;
+  );
+);
+
+function pushcolour(r,g,b,a)
+(
+rgba(r,g,b,a);
+cstack<64 ?  cstack+=4;
+);
+
+function peekcolour(ssp)
+(
+ssp+=1;
+(cstack-ssp*4)>=0 ?
+  (
+  gfx_r=ColourStack[cstack-ssp*4];
+  gfx_g=ColourStack[cstack+1-ssp*4];
+  gfx_b=ColourStack[cstack+2-ssp*4];
+  gfx_a=ColourStack[cstack+3-ssp*4];
+  );
+);
+function popcolour()
+(
+cstack>0 ? 
+  (
+  cstack-=4;
+  gfx_r=ColourStack[cstack];
+  gfx_g=ColourStack[cstack+1];
+  gfx_b=ColourStack[cstack+2];
+  gfx_a=ColourStack[cstack+3];
+  );
+);
+function TextPixels(x,y,s,f)
+(
+gfx_measurestr(s,w,h);
+gfx_x=x;
+gfx_y=y;
+
+f&1==1 ? gfx_x=x-w/2; // Centered
+f&2==2 ? gfx_x=x-w;   // Right Justified
+f&4==4 ? gfx_y=y-h/2; // Centered
+f&8==8 ? gfx_y=y-h;  // Bottom
+_gsx=gfx_x;
+_gex=gfx_x+w;
+_gsy=gfx_y;
+_gey=gfx_y+h;
+gfx_drawstr(s);
+_textnextx=gfx_x+w;
+_textnexty=gfx_y+h;
+
+);
+
+function MouseHit()
+(
+_res=0;
+mouse_x>=_gsx && mouse_x<=_gex && mouse_y>=_gsy && mouse_y<=_gey ?(_res=1;didmousehit=1;);
+_res;
+);
+
+function MouseDown(x)
+(
+_res=0;
+(LastMouse!=mouse_cap) && ((mouse_cap & x)>0) ? _res=1;
+_res;
+);
+function Text(x,y,s,f)
+(
+x=(x*grid_sx);
+y=(y*grid_sy);;
+TextPixels(x,y,s,f);
+
+);
+
+function TextOutline(x,y,str,format,size)
+(
+    pushcolour();
+    //rgba(0.0,0.0,0.0,1); //  shadowcolour
+    peekcolour(2);
+    size!=0?
+      (
+      Text(x-size,y-size,str,format);
+      Text(x+size,y-size,str,format);
+      Text(x-size,y+size,str,format);
+      Text(x+size,y+size,str,format);
+      );
+    popcolour(); 
+
+    Text(x,y,str,format);
+    TextRectStack[TextRectPointer*4+0]=_gsx;
+    TextRectStack[TextRectPointer*4+1]=_gsy;
+    TextRectStack[TextRectPointer*4+2]=_gex-_gsx;
+    TextRectStack[TextRectPointer*4+3]=_gey-_gsy;
+    TextRectPointer+=1;
+);
+
+function TextRect(w,h)
+(
+gfx_rect(TextRectStack[TextRectPointer*4+0]-w,TextRectStack[TextRectPointer*4+1]-h,TextRectStack[TextRectPointer*4+2]+w*2,TextRectStack[TextRectPointer*4+3]+h*2);
+);
+function TextOutlineNextHorizontal(str,size)
+(
+x=_gex;
+y=_gsy;
+    pushcolour();
+    peekcolour(2);
+    size!=0?
+      (
+      TextPixels(x-size,y-size,str,format);
+      TextPixels(x+size,y-size,str,format);
+      TextPixels(x-size,y+size,str,format);
+      TextPixels(x+size,y+size,str,format);
+      );
+    popcolour();        
+    TextPixels(x,y,str,format);
+);
+
+function TitleColour(r,g,b,a)
+(
+tcolour.r=r;
+tcolour.g=g;
+tcolour.b=b;
+tcolour.a=a;
+);
+
+function SetRGBA()
+(
+gfx_r=this.r;
+gfx_g=this.g;
+gfx_b=this.b;
+gfx_a=this.a;
+);
+function ValueColour(r,g,b,a)
+(
+vcolour.r=r;
+vcolour.g=g;
+vcolour.b=b;
+vcolour.a=a;
+);
+
+function ThickLine(x1,y1,x2,y2,w) local(dx,dy,len,nx,ny)
+(
+dx=x2-x1;
+dy=y2-y1;
+len=sqrt(dx*dx+dy*dy);
+nx=-dy/len*w/2;
+ny=dx/len*w/2;
+gfx_mode=0;
+gfx_triangle(x1-nx,y1-ny,x1+nx,y1+ny,x2-nx,y2-ny,x2+nx,y2+ny);
+// gfx_triangle doesn't antialias 
+// this is a sloppy fix
+
+//gfx_line(x1,y1,x2,y2);
+gfx_line(x1-nx,y1-ny,x2-nx,y2-ny,1);
+gfx_line(x1+nx,y1+ny,x2+nx,y2+ny,1);
+
+gfx_line(x1-nx,y1-ny,x1+nx,y1+ny,1);
+gfx_line(x2-nx,y2-ny,x2+nx,y2+ny,1);
+gfx_mode=0;
+);
+
+function ThickLineRound(x1,y1,x2,y2,w)
+(
+ThickLine(x1,y1,x2,y2,w);
+gfx_circle(x1,y1,w/2,1);
+gfx_circle(x2,y2,w/2,1);
+);
+function DrawGrid() local(sx,sy)
+(
+(mouse_cap & 4)==4 && lmc==0 ? drawgrid=drawgrid~1;
+lmc=mouse_cap & 4;
+drawgrid==1 ?
+  (
+  l=0;
+  sx=floor(mouse_x/grid_sx+0.5);
+  sy=floor(mouse_y/grid_sy+0.5);
+//  gfx_x=sx*grid_sx+15;
+//  gfx_y=sy*grid_sy+10;
+
+  gfx_setfont(1,"Arial Bold",cell_len);
+  ts=#;
+  tx=sx+1;
+  ty=sy+0.5;
+  sprintf(ts,"%dx%d",sx,sy);
+  mouse_x>(gfx_w/2)? tx-=4;
+  mouse_y>(gfx_h/2)? ty-=3;
+ // gfx_drawstr(ts);
+
+  sx*=grid_sx;
+  sy*=grid_sy;
+  gfx_set(0.47,1,0.47,0.23);
+  gfx_rect(sx-5,sy-5,10,10,1);
+  while (l<grid_x)
+    (
+    sx=l*gfx_w/grid_x;
+    gfx_line(sx,0,sx,gfx_h);
+    l+=1;
+    );
+  l=0;
+  while (l<grid_y)
+    (
+    sy=l*gfx_h/grid_y;
+    gfx_line(0,l*gfx_h/grid_y,gfx_w,l*gfx_h/grid_y);
+    l+=1;
+    );
+    gfx_set(0.1,0.9,0.1,0.93);
+    TextOutline(tx,ty,ts,0,0.1);
+  );
+);
+
+
+function roundrectpixels(x1,y1,x2,y2,rad)
+(
+rad=floor(rad);
+
+// SDS - I was lazy this needs to be 3 rects to reduce 
+// fill rate, since the cpu is rasterizing
+
+gfx_rect(floor(x1+rad),floor(y1),floor((x2-x1)-2*rad),floor(y2-y1),1);
+gfx_rect(floor(x1),floor(y1+rad),floor(rad),floor((y2-y1)-2*rad),1);
+gfx_rect(floor(x2-rad),floor(y1+rad),floor(rad),floor((y2-y1)-2*rad),1);
+
+gfx_circle(floor(x1+rad+1),floor(y1+rad),rad,1,1);
+gfx_circle(floor(x2-rad-2),floor(y1+rad),rad,1,1);
+gfx_circle(floor(x2-rad-2),floor(y2-rad-2),rad,1,1);
+gfx_circle(floor(x1+rad+1),floor(y2-rad-2),rad,1,1);
+);
+
+
+function TextRectRound(w,h,rad)
+(
+sx=TextRectStack[TextRectPointer*4+0]-w;
+sy=TextRectStack[TextRectPointer*4+1]-h;
+ex=TextRectStack[TextRectPointer*4+2]+w*2+sx;
+ey=TextRectStack[TextRectPointer*4+3]+h*2+sy;
+roundrectpixels(sx,sy,ex,ey,rad);
+);
+
+
+function roundrect(x1,y1,x2,y2,rad)
+(
+rad=floor(rad);
+x1=floor(x1*grid_sx);
+y1=floor(y1*grid_sy);
+x2=floor(x2*grid_sx);
+y2=floor(y2*grid_sy);
+
+// SDS - I was lazy this needs to be 3 rects to reduce 
+// fill rate, since the cpu is rasterizing
+
+gfx_rect(floor(x1+rad),floor(y1),floor((x2-x1)-2*rad),floor(y2-y1),1);
+gfx_rect(floor(x1),floor(y1+rad),floor(rad),floor((y2-y1)-2*rad),1);
+gfx_rect(floor(x2-rad),floor(y1+rad),floor(rad),floor((y2-y1)-2*rad),1);
+
+gfx_circle(floor(x1+rad+1),floor(y1+rad),rad,1,1);
+gfx_circle(floor(x2-rad-2),floor(y1+rad),rad,1,1);
+gfx_circle(floor(x2-rad-2),floor(y2-rad-2),rad,1,1);
+gfx_circle(floor(x1+rad+1),floor(y2-rad-2),rad,1,1);
+);
+
+function roundrectouter(x1,y1,x2,y2,rad)
+(
+rad=floor(rad);
+x1=floor(x1*grid_sx);
+y1=floor(y1*grid_sy);
+x2=floor(x2*grid_sx);
+y2=floor(y2*grid_sy);
+
+// SDS - I was lazy this needs to be 4 rects
+// just to draw the outer edge - to reduce 
+// fill rate, since the cpu is rasterizing
+gfx_rect(floor(x1),floor(y1+rad),floor(rad),floor((y2-y1)-2*rad),1);
+gfx_rect(floor(x2-rad),floor(y1+rad),floor(rad),floor((y2-y1)-2*rad),1);
+gfx_rect(floor(x1+rad),floor(y1),floor((x2-x1)-2*rad),floor(rad),1);
+gfx_rect(floor(x1+rad),floor(y2-rad),floor((x2-x1)-2*rad),floor(rad),1);
+
+gfx_circle(floor(x1+rad+1),floor(y1+rad),rad,1,1);
+gfx_circle(floor(x2-rad-2),floor(y1+rad),rad,1,1);
+gfx_circle(floor(x2-rad-2),floor(y2-rad-2),rad,1,1);
+gfx_circle(floor(x1+rad+1),floor(y2-rad-2),rad,1,1);
+);
+
+function roundrectoutline(x1,y1,x2,y2,rad,bsize)
+(
+// SDS - super lazy again, needs to draw just the outer
+// part of the outline rect - again fill rate is
+// to high!
+peekcolour(1);
+roundrectouter(x1,y1,x2,y2,rad);
+peekcolour(0);
+roundrect(x1+bsize,y1+bsize,x2-bsize,y2-bsize,rad*0.9);
+);
+function HitRect(x,y,rx1,ry1,rx2,ry2)
+(
+rx1=(rx1*grid_sx);
+ry1=(ry1*grid_sy);
+rx2=(rx2*grid_sx);
+ry2=(ry2*grid_sy);
+
+res=0;
+x>=rx1 && x<=rx2 && y>=ry1 && y<=ry2 ? res=1;
+res;
+);
+
+// r1=radius r2=inner radius percentage
+function RoundDial(x,y,v,r1,r2) local(v)
+(
+x=(x*grid_sx);
+y=(y*grid_sy);
+r2*=r1;
+v*=0.75;
+v=(v*2*$pi)+$pi/2+$pi/4;
+
+//colorinc(-0.2);
+gfx_circle(x,y,r1,1,1);
+colorinc(0.2);
+gfx_circle(x-1,y-1,r1,1,1);
+colorinc(-0.4);
+gfx_circle(x+1,y+1,r1,1,1);
+colorinc(0.4);
+r1*=0.9;
+ThickLineRound(x+cos(v)*(r1-2),y+sin(v)*(r1-2),x+cos(v)*r2,y+sin(v)*r2,r1/8);
+colorinc(-0.2);
+
+
+
+);
+
+
+
+function NormalTxt()
+(
+gfx_set(0.7,0.7,0.7,1);
+);
+
+
+
+// 0=float 1=int 2=hz 3=display% 4=secs
+function DialString(idx) local(f,res,v)
+(
+//v=slider(idx+1);
+v=Sliders[idx*5+0];
+f=Sliders[idx*5+3]; // flags
+res=idx+512;
+f==0 ? floatString(v,res);
+f==1 ? IntString(v,res);
+f==2 ? FreqString(v,res);
+f==3 ? PercentString(v,res);
+f==4 ? SecsString(v,res);
+res;
+);
+
+function Value(idx) local(v,vmin,vmax)
+(
+v=slider(idx+1);
+
+);
+
+function DialValue(idx) local(v,vmin,vmax)
+(
+v=slider(idx+1);
+vmin=Sliders[idx*5+1];
+vmax=Sliders[idx*5+2];
+(v-vmin)/(vmax-vmin);
+);
+
+function MouseWheel(idx)
+(
+(mouse_wheel!=0) ? 
+  (
+  vmin=Sliders[idx*5+1];
+  vmax=Sliders[idx*5+2];
+  pv=(slider(idx+1)-vmin)/(vmax-vmin);
+  Sliders[idx*5+3]==1 ?   pv+=mouse_wheel/1500:  pv+=mouse_wheel/3000;
+  slider(idx+1)=(clamp(pv,0,1)*(vmax-vmin))+vmin;
+  sliders[idx*5+4]=(clamp(pv,0,1)*(vmax-vmin))+vmin;
+  Sliders[idx*5+3]==1 ? slider(idx+1)=floor(slider(idx+1));
+  sliderchange(mouseidx+1);
+ );
+mouse_wheel=0;
+);
+
+function MouseDial(x,y,rad,idx)
+(
+//rad*=1.5;
+(mouse_cap&1)==0 ? mouseidx=-1;
+x=(x*grid_sx);
+y=(y*grid_sy);
+dist=(sqr(mouse_x-x)+sqr(mouse_y-y));
+(dist<(rad*rad))?
+  (
+  didmousehit=1;
+  MouseWheel(idx);
+  // Hintstring
+  hoveridx=idx;
+  hoverhint=idx+256;
+  // Right click default value
+  ((mouse_cap & 2)==2) ?
+    (
+    slider(idx+1)=Sliders[idx*5];
+    Sliders[idx*5+4]=Sliders[idx*5];
+    );
+  // Left click drag
+  ((pmc&1)==0) && ((mouse_cap & 1)==1) ?
+    (
+
+    mouseidx=idx;
+    mouseoy=mouse_y;
+    mouseox=mouse_x;
+    vmin=Sliders[mouseidx*5+1];
+    vmax=Sliders[mouseidx*5+2];
+    mousevalue=(slider(mouseidx+1)-vmin)/(vmax-vmin);
+    );
+  );
+);
+
+
+function DoMouseValueDrag()
+(
+mouseidx>-1 ?
+  (
+  mousedelta=mousevalue+(mouse_x-mouseox)*0.0005+(mouseoy-mouse_y)*0.005;
+  vmin=Sliders[mouseidx*5+1];
+  vmax=Sliders[mouseidx*5+2];
+  slider(mouseidx+1)=(clamp(mousedelta,0,1)*(vmax-vmin))+vmin;
+  sliders[mouseidx*5+4]=(clamp(mousedelta,0,1)*(vmax-vmin))+vmin;
+  Sliders[mouseidx*5+3]==1 ? slider(mouseidx+1)=floor(slider(mouseidx+1));
+  sliderchange(mouseidx+1);
+  );
+  pmc=mouse_cap;
+);
+
+function ShowValueText(z)
+(
+NoDialValues=z;
+);
+function SmallDial(x,y,idx)
+(
+RoundDial(x,y,DialValue(idx),cell_len/2,0.4);
+MouseDial(x,y,cell_len/2,idx);
+pushcolour();
+tcolour.SetRGBA();
+NoText!=1?
+Text(x,y-1.0,idx,5+256);
+NoDialValues<1?
+(
+
+vcolour.SetRGBA();
+Text(x,y+1.1,DialString(idx),5+256);
+
+);
+popcolour();
+);
+
+function MediumDial(x,y,idx)
+(
+RoundDial(x,y,DialValue(idx),cell_len*01.2,0.24);
+MouseDial(x,y,cell_len,idx);
+pushcolour();
+
+tcolour.SetRGBA();
+NoText!=1?
+Text(x,y-2,idx,5+256);
+NoDialValues<1?
+(
+vcolour.SetRGBA();
+(mouseidx==idx) || (mouseidx<0 && hoveridx==idx)? colorinc(0.5);
+
+Text(x,y+2,DialString(idx),5+256);
+);
+popcolour();
+);
+
+
+function BigDial(x,y,idx)
+(
+RoundDial(x,y,DialValue(idx),cell_len*1.5,0.4);
+MouseDial(x,y,60,idx);
+pushcolour();
+tcolour.SetRGBA();
+NoText!=1?
+Text(x,y-3,idx,5+256);
+NoDialValues<1?
+(
+vcolour.SetRGBA();
+Text(x,y+3,DialString(idx),5+256);
+);
+popcolour();
+);
+function StartGFX(w,h,gw,gh)
+(
+TextRectPointer=0;
+cstack=0;
+hoveridx=-1;
+hoverhint=-1;
+mouse_cap==0 ? didmousehit=0;
+gfx_w=w;
+gfx_h=h;
+grid_x=gw;
+grid_y=gh;
+grid_sx=gfx_w/grid_x;
+grid_sy=gfx_h/grid_y;
+// SDS - dunno which method is betterererererer for resizing!
+cell_len=min(grid_sx,grid_sy)*sqrt(2);
+//cell_len=sqrt(grid_sx*grid_sx+grid_sy*grid_sy);
+);
+
+function EndGFX()
+(
+LastMouse=mouse_cap;
+DrawGrid();
+DoMouseValueDrag();
+);
+function HannWindow(buffer,size)
+(
+x=0;
+while (x<size)
+  (
+  buffer[x]=sin($pi*x/size)*sin($pi*x/size);
+  x+=1;
+  )
+);
+_memp=1000;
+TitleColour(1,1,1,1);
+ValueColour(1,1,0,1);
+TextRectStack=GetMem(1000,4);
+TextRectPointer=0;
+ColourStack=GetMem(64,4);
+cstack=0;
+Sliders=GetMem(256*5);
+SliderCount=0;
+SinWindow=GetMem(srate);
+SinWindow(SinWindow,8192);
+//HannWindow(SinWindow,8192);
+Filters=GetMem(1024*32); // Max of 1024 BiQuad Filters
+Enevelops=GetMem(1024); // Envelope Followers
+FontName="Optimus";
+FontNameBold=#;
+strcpy(FontNameBold,FontName);
+strcat(FontNameBold," Bold");
+FontNameBold="Optimus";
+NoDialValues=0;
+
+
+

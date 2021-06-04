@@ -1,0 +1,248 @@
+desc:FFT Reverb
+slider1:ssize=0.3<0.01,1>-Room size
+slider2:decay=0<0,1>-Decay
+slider3:diffusion=0.618<0,1>-Diffusion
+slider4:stereo=0<0,1>-Stereo Width
+slider5:lopass=20000<10,20000>-Low Pass
+slider6:hipass=10<10,2000>-High Pass
+slider7:wet=0.75<0,1>-Wet
+slider8:dry=1<0,1>-Dry
+
+in_pin:left input
+in_pin:right input
+out_pin:left output
+out_pin:right output
+import stronic-lib.js-inc
+@init
+function NearestPOT(x)
+(
+x=floor(x);
+x-=1;
+x|=x>>1;
+x|=x>>2;
+x|=x>>4;
+x|=x>>8;
+x|=x>>16;
+x+=1;
+x
+);
+FFTSize=8192;
+MAXFFT=65536*2;
+_memp=65536+floor(_memp/65536)*65536;
+FIFO=GetMem(MAXFFT*2);
+FFTInBuffer=GetMem(MAXFFT*2);
+FFTOutBuffer=GetMem(MAXFFT*2);
+//FFTOutBuffer2=GetMem(MAXFFT*2);
+OutFIFOL=GetMem(MAXFFT*2);
+OutFIFOR=GetMem(MAXFFT*2);
+OutFIFOL2=GetMem(MAXFFT*2);
+OutFIFOR2=GetMem(MAXFFT*2);
+TL=GetMem(MAXFFT*2);
+TR=GetMem(MAXFFT*2);
+FifoPointer=0;
+
+
+AddSliderFloat("Room Size",0.5,0.01,1,"Hint: Controls the maximum delay line time.");
+AddSliderFloat("Decay",0.7,0,1,"Hint: set the FDN matrix feedback - that's essentially the reverb decay time. Freeze at 100%.");
+AddSliderFloat("Diffusion",0.6,0,1,"Hint: set the Allpass filter feedback. This controls the diffusion amount and attack.");
+AddSliderFloat("Stereo",0.7,0,1,"Hint: Percentage change each delay line time in the FDN and the Allpass serial array.");
+AddSliderFreq("Lo Pass",20000,10,20000,"Hint: Modulation rate - as the rate increases the depth will automatically decrease.");
+AddSliderFreq("Hi Pass",10,10,2000,"Hint: Modulation rate - as the rate increases the depth will automatically decrease.");
+AddSliderFloat("Wet",0.75,0,1,"Hint: Modulation rate - as the rate increases the depth will automatically decrease.");
+AddSliderFloat("Dry",1,0,1,"Hint: Modulation rate - as the rate increases the depth will automatically decrease.");
+
+@slider
+
+//FFTSize=1<<size;
+
+@sample
+
+function DoFFT(Buffer,offset,FFTOut,OutL,OutR)
+(
+ x=0;
+ while (x<FFTSizE)
+ (
+ FFTInBuffer[x*2+0]=0;
+ FFTInBuffer[x*2+1]=0;
+ x+=1;
+ 
+ );
+ xm=1;
+ x=0;
+  while (x<size)
+    (
+    window=1;
+    window = sin($pi*x/FFTSize);
+    FFTInBuffer[x*2+0]=Buffer[(x+offset)%size]*window;
+    FFTInBuffer[x*2+1]=0;
+    x+=1;
+    );
+  fft(FFTInBuffer, FFTSize);
+  fft_permute(FFTInBuffer, FFTSize); 
+
+  x=0;
+  while (x<FFTSize)
+    (
+    // Handle reverb freeze
+    decay==1?
+    (
+    FFTOut[x*2+0]=(FFTOut[x*2+0]*pow(decay,1/12));
+    FFTOut[x*2+1]=(FFTOut[x*2+1]*pow(decay,1/12));
+ )
+    :
+    (
+    FFTOut[x*2+0]=((FFTOut[(x)*2+0])*pow(decay,1/12))+FFTInBuffer[x*2+0];
+    FFTOut[x*2+1]=((FFTOut[(x)*2+1])*pow(decay,1/12))+FFTInBuffer[x*2+1];
+    );
+    // Diffusion
+    rs=FFTOut[x*2+0];
+    is=FFTOut[x*2+1];
+    mag=sqrt(rs*rs+is*is);
+    ang=atan2(rs,is)+((1)*rand(diffusion*2*$pi));
+    rs=sin(ang)*mag;
+    is=cos(ang)*mag;
+    FFTOut[x*2+0]=rs;
+    FFTOut[x*2+1]=is;
+    
+    TL[x*2+0]=FFTOut[x*2+0];
+    TL[x*2+1]=FFTOut[x*2+1];
+    // Stereo
+    ang+=$pi*sin(2*x/FFTSize)*stereo;
+    rs=sin(ang)*mag;
+    is=cos(ang)*mag;
+      
+    TR[x*2+0]=rs;
+    TR[x*2+1]=is; 
+    x+=1;
+    );
+  fft_ipermute(TL, FFTSize);     
+  IFFT(TL,FFTSize); 
+  
+  fft_ipermute(TR, FFTSize);     
+  IFFT(TR,FFTSize); 
+  x=0;
+while (x<size)
+  (
+  window = sin($pi*x/size);
+  OutL[((x+offset)%size)]=TL[(x)*2]*window;
+  OutR[((x+offset)%size)]=TR[(x)*2]*window;
+  x+=1;
+  );
+
+  );
+
+
+
+esize=pow(ssize,2);
+FFTSize=NearestPOT(esize*srate);
+//FFTSize<512? FFTSize=512;
+size=FFTSize;
+size=(esize*srate)&0xffffe;
+lssize!=esize ?
+(
+x=0;
+ while (x<FFTSize)
+ (
+ FFTInBuffer[x*2+0]=0;
+ FFTInBuffer[x*2+1]=0;
+ FFTOutBuffer[x*2+0]=0;
+ FFTOutBuffer[x*2+1]=0;
+ FFTOutBuffer[x*2+0]=0;
+ FFTOutBuffer[x*2+1]=0;
+ FFTOutBuffer[x*2+0]=0;
+ FFTOutBuffer[x*2+1]=0;
+ x+=1;
+ );
+ );
+ lssize=esize;
+in=(spl0+spl1)/2;
+hfc=(80/srate)/((80/srate)+1);
+hpi+=(in-hpi)*hfc;
+
+hpo=in-hpi;
+
+FIFO[FifoPointer]=hpo;
+
+outl=OutFIFOL[FifoPointer]/FFTSIZE;
+outr=OutFIFOR[FifoPointer]/FFTSIZE;
+outl+=OutFIFOL2[FifoPointer]/FFTSIZE;
+outr+=OutFIFOR2[FifoPointer]/FFTSIZE;
+FifoPointer+=1;
+FifoPointer==(size/2)?
+  (
+  DoFFT(FIFO,size/2,FFTOutBuffer,OutFIFOL2,OutFIFOR2);
+  );
+FifoPointer>=size?
+  (
+  DoFFT(FIFO,0,FFTOutBuffer,OutFIFOL,OutFIFOR);
+  FifoPointer=0;
+  );
+
+// Process Filters
+
+  lofc=(lopass/srate*2)/(((lopass/srate*2))+1);
+  hifc=(hipass/srate*2)/(((hipass/srate*2))+1);
+
+outlp+=(outl-outlp)*lofc;
+outrp+=(outr-outrp)*lofc;
+
+outlh+=(outlp-outlh)*hifc;
+outrh+=(outrp-outrh)*hifc;
+
+outlp-=outlh;
+outrp-=outrh;
+spl0 = (spl0*(dry))+wet*outlp;
+spl1 = (spl1*(dry))+wet*outrp;
+
+@gfx
+function vgrad(x,y,w,h)
+(
+rd=(ColourStack[cstack-4]-ColourStack[cstack-8])/h;
+gd=(ColourStack[cstack-3]-ColourStack[cstack-7])/h;
+bd=(ColourStack[cstack-2]-ColourStack[cstack-6])/h;
+ad=(ColourStack[cstack-1]-ColourStack[cstack-5])/h;
+gfx_gradrect(x,y,w,h,ColourStack[cstack-8],ColourStack[cstack-7],ColourStack[cstack-6],ColourStack[cstack-5],0,0,0,0,rd,gd,bd,ad);
+);
+TitleColour(0.7,0.7,0.7,1); // white
+ValueColour(0.2,0.1,0,1); // orange
+
+
+
+//StartGFX(772,392,26,14);    // uncomment this if u want fixed size
+StartGFX(gfx_w,gfx_h,26,13);
+
+pushcolour(0.4,0.19,0.19,1);
+pushcolour(0,0,0,1);
+pushcolour(0,0,0,1);
+
+pushcolour(0,0.3,0.5,1);
+pushcolour(0.1,0.1,0.2,1);
+vgrad(0,0,gfx_w,gfx_h);
+//roundrectoutline(0,0,26,13,10,.25);
+FontName="arial";
+FontNameBold=#;
+strcpy(FontNameBold,FontName);
+strcat(FontNameBold," Bold");
+gfx_setfont(1,FontNameBold,cell_len*1.2);
+pushcolour(0.19,0.19,0.19,1);
+pushcolour(0.9,0.9,0.9,1);
+TextOutline(1,2,"FFT Reverb",8,0.102);
+gfx_setfont(1,FontNameBold,cell_len/2);
+TextOutline(25,1.5,"V1.00",10,0.102);
+
+TextOutline(25,2,"shabtronic@gmail.com",10,0.102);
+gfx_setfont(1,FontNameBold,cell_len/1.3);
+
+pushcolour(0.0,0.0,0.0,1);
+pushcolour(0.3,0.3,0.3,1);
+NoDialValues=1;
+MediumDial(3,5.6,0);      // time
+MediumDial(3,10,1);     // Cascade
+MediumDial(9.5,5.6,2);      // time
+MediumDial(9.5,10,3);     // Cascade
+MediumDial(16,5.6,4);      // time
+MediumDial(16,10,5);     // Cascade
+MediumDial(23,5.6,6);      // time
+MediumDial(23,10,7);     // Cascade
+
+EndGFX();
