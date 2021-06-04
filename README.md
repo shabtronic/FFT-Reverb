@@ -8,7 +8,7 @@ FFT will be overlap and add with a appropriate window.
 
 Hoping that the springs store the historical impulse information and make it sound like a delay based reverb, but without the mode resonance of a delay line.
 
-
+![](./Images/FFTReverb.png)
 
 Acutal Implementation
 
