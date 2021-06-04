@@ -8,3 +8,16 @@ FFT will be overlap and add with a appropriate window.
 
 Hoping that the springs store the historical impulse information and make it sound like a delay based reverb, but without the mode resonance of a delay line.
 
+
+
+Acutal Implementation
+
+Turns out - no need for springs on the phase - just adding random noise to the phase acts as diffusion.
+Sounds pretty good all round - super smooth and clean.
+
+With small FFT sizes, it turns into a modulation mess tho!
+
+Implemented with 2 overlapping FFTs, sin window e.t.c.
+
+I choose the next POT FFT size based on the delay/window size.
+
