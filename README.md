@@ -11,7 +11,7 @@ Hoping that the springs store the historical impulse information and make it sou
 
 ![](./Images/FFTReverb.png)
 
-## Acutal Implementation
+## Actual Implementation
 
 Turns out - no need for springs on the phase - just adding random noise to the phase acts as diffusion.
 Sounds pretty good all round - super smooth and clean. Because any kind of phase modulation will introduce discontinuities at the window edges, it best to overlap 2 signal windows and also have a window function to zero the edges.
