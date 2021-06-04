@@ -10,7 +10,7 @@ Hoping that the springs store the historical impulse information and make it sou
 
 ![](./Images/FFTReverb.png)
 
-Acutal Implementation
+## Acutal Implementation
 
 Turns out - no need for springs on the phase - just adding random noise to the phase acts as diffusion.
 Sounds pretty good all round - super smooth and clean.
