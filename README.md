@@ -21,3 +21,7 @@ Implemented with 2 overlapping FFTs, sin window e.t.c.
 
 I choose the next POT FFT size based on the delay/window size.
 
+## To do
+
+Add some of graph editor, so I can edit the decay of FFT bin frequencies e.t.c.
+
