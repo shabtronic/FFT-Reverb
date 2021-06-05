@@ -24,6 +24,9 @@ I choose the next POT FFT size based on the delay/window size.
 
 The difference with a all pass diffuser, is that the all pass system require a ton of iterations/plumbing to hide the cyclic phase changes. The FFT doesn't require that - hence
 only 1 window's worth of signal can be phase scrambled into a pleasing non-cyclic diffused sound.
+## Installing
+
+Simply copy the three files into your reaper/effects directory (can be a sub dir in there if u like).
 
 ## To do
 
